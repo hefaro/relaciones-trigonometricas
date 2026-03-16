@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evaluación: Razones Trigonométricas</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .option-btn.selected { border-color: #4f46e5; background-color: #f5f3ff; color: #4f46e5; box-shadow: 0 0 0 2px #4f46e5; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen p-4">
+
+    <div class="max-w-2xl mx-auto">
+        <div id="setup-section" class="bg-white rounded-3xl shadow-xl p-8 space-y-6">
+            <div class="text-center">
+                <h1 class="text-2xl font-black text-slate-800 uppercase tracking-tighter italic">Reto de Trigonometría</h1>
+                <p class="text-slate-500 text-sm">Institución Educativa - Buga</p>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-black uppercase text-slate-400 mb-1">Grupo</label>
+                    <select id="group-select" class="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold outline-none focus:border-indigo-500">
+                        <option value="">-- Seleccionar Grupo --</option>
+                        <option value="8-3">8-3</option>
+                        <option value="8-4">8-4</option>
+                        <option value="9-1">9-1</option>
+                        <option value="9-2">9-2</option>
+                        <option value="9-3">9-3</option>
+                        <option value="9-4">9-4</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-black uppercase text-slate-400 mb-1">Estudiante</label>
+                    <select id="studentNameSelect" class="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold outline-none disabled:opacity-50" disabled>
+                        <option value="">-- Primero elige grupo --</option>
+                    </select>
+                </div>
+            </div>
+
+            <button id="start-btn" class="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-xl shadow-lg disabled:opacity-50" disabled>
+                INICIAR EXAMEN
+            </button>
+        </div>
+
+        <div id="quiz-area" class="hidden space-y-4">
+            <div class="bg-white p-4 rounded-2xl shadow-sm flex justify-between items-center border border-slate-200">
+                <div class="text-center">
+                    <p class="text-[10px] font-black text-slate-400 uppercase">Pregunta</p>
+                    <p class="font-black text-indigo-600" id="current-q-num">1/10</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-[10px] font-black text-slate-400 uppercase">Tiempo</p>
+                    <p class="font-black text-2xl text-red-600" id="timer-display">200s</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-[10px] font-black text-slate-400 uppercase">Aciertos</p>
+                    <p class="font-black text-emerald-600" id="live-hits">0</p>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-3xl shadow-xl overflow-hidden">
+                <div class="h-64 p-4 border-b border-slate-100">
+                    <canvas id="trigChart"></canvas>
+                </div>
+                <div class="p-8">
+                    <h2 id="question-text" class="text-lg font-bold text-slate-800 mb-6"></h2>
+                    <div id="options-grid" class="space-y-3"></div>
+                    <button id="next-btn" class="w-full mt-8 bg-emerald-500 text-white py-4 rounded-2xl font-black disabled:opacity-50" disabled>
+                        CONFIRMAR RESPUESTA
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="final-results" class="hidden bg-white rounded-3xl shadow-2xl p-10 text-center">
+            <h2 class="text-xl font-black text-slate-800 mb-4">EXAMEN TERMINADO</h2>
+            <p class="text-slate-400 font-bold uppercase text-xs">Calificación</p>
+            <div class="text-7xl font-black text-indigo-600 my-4" id="final-score">0.0</div>
+            <p id="save-status" class="text-emerald-600 font-bold bg-emerald-50 p-3 rounded-lg inline-block text-sm">Enviando nota...</p>
+        </div>
+    </div>
+
+    <script src="banco_preguntas.js"></script>
+    <script src="comunicacion_com5A.js"></script>
+
+    <script>
+        // Referencias al DOM
+        const dom = {
+            group: document.getElementById('group-select'),
+            name: document.getElementById('studentNameSelect'),
+            start: document.getElementById('start-btn'),
+            setup: document.getElementById('setup-section'),
+            quiz: document.getElementById('quiz-area'),
+            question: document.getElementById('question-text'),
+            options: document.getElementById('options-grid'),
+            next: document.getElementById('next-btn'),
+            timer: document.getElementById('timer-display'),
+            qNum: document.getElementById('current-q-num'),
+            hits: document.getElementById('live-hits'),
+            results: document.getElementById('final-results'),
+            score: document.getElementById('final-score'),
+            status: document.getElementById('save-status')
+        };
+
+        let state = {
+            exam: [],
+            index: 0,
+            aciertos: 0,
+            timeLeft: 200,
+            timerId: null,
+            seleccion: null,
+            apiUrl: null,
+            chart: null
+        };
+
+        // Lógica para cargar estudiantes (Corregido el flujo de la promesa)
+        dom.group.addEventListener('change', async () => {
+            const grupo = dom.group.value;
+            if (!grupo) return;
+
+            dom.name.disabled = true;
+            dom.name.innerHTML = '<option>Cargando lista...</option>';
+
+            try {
+                // Llamada a la función del archivo comunicacion_com5A.js
+                const [nombres, url] = await GoogleSheet.obtenerNombres(grupo);
+                state.apiUrl = url;
+
+                dom.name.innerHTML = '<option value="">-- Selecciona tu nombre --</option>';
+                if (nombres && nombres.length > 0) {
+                    nombres.forEach(n => {
+                        let opt = document.createElement('option');
+                        opt.value = opt.textContent = n;
+                        dom.name.appendChild(opt);
+                    });
+                    dom.name.disabled = false;
+                } else {
+                    dom.name.innerHTML = '<option>No se encontraron nombres</option>';
+                }
+            } catch (err) {
+                dom.name.innerHTML = '<option>Error al cargar</option>';
+            }
+        });
+
+        dom.name.addEventListener('change', () => {
+            dom.start.disabled = !dom.name.value;
+        });
+
+        dom.start.onclick = () => {
+            dom.setup.classList.add('hidden');
+            dom.quiz.classList.remove('hidden');
+            state.exam = [...bancoPreguntas].sort(() => Math.random() - 0.5).slice(0, 10);
+            startTimer();
+            render();
+        };
+
+        function startTimer() {
+            state.timerId = setInterval(() => {
+                state.timeLeft--;
+                dom.timer.textContent = state.timeLeft + 's';
+                if (state.timeLeft <= 0) finish();
+            }, 1000);
+        }
+
+        function render() {
+            const q = state.exam[state.index];
+            state.seleccion = null;
+            dom.next.disabled = true;
+            dom.qNum.textContent = `${state.index + 1}/10`;
+            dom.hits.textContent = state.aciertos;
+            dom.question.textContent = q.pregunta;
+            dom.options.innerHTML = '';
+
+            q.opciones.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = "option-btn w-full p-4 border-2 border-slate-200 rounded-xl text-left font-bold transition-all";
+                btn.textContent = opt;
+                btn.onclick = () => {
+                    document.querySelectorAll('.option-btn').forEach(b => b.classList.remove('selected'));
+                    btn.classList.add('selected');
+                    state.seleccion = opt;
+                    dom.next.disabled = false;
+                };
+                dom.options.appendChild(btn);
+            });
+            draw(q.puntos, q.indiceRojo);
+        }
+
+        function draw(pts, idxRojo) {
+            const ctx = document.getElementById('trigChart').getContext('2d');
+            if (state.chart) state.chart.destroy();
+            state.chart = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        data: [...pts, pts[0]],
+                        showLine: true, borderColor: '#4f46e5', borderWidth: 3,
+                        pointRadius: pts.map((_, i) => i === idxRojo ? 6 : 3),
+                        pointBackgroundColor: pts.map((_, i) => i === idxRojo ? '#ff0000' : '#333')
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { x: { display: false }, y: { display: false } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        dom.next.onclick = () => {
+            if (state.seleccion === state.exam[state.index].correcta) state.aciertos++;
+            if (state.index < 9) {
+                state.index++;
+                render();
+            } else {
+                finish();
+            }
+        };
+
+        async function finish() {
+            clearInterval(state.timerId);
+            dom.quiz.classList.add('hidden');
+            dom.results.classList.remove('hidden');
+            const nota = (state.aciertos * 0.5).toFixed(1);
+            dom.score.textContent = nota;
+
+            try {
+                const res = await GoogleSheet.guardarResultado(state.apiUrl, {
+                    nombre: dom.name.value,
+                    puntaje: nota,
+                    juego: "Razones trigonometrica",
+                    grupo: dom.group.value
+                });
+                dom.status.textContent = "✓ Sincronizado correctamente";
+            } catch (e) {
+                dom.status.textContent = "Error al guardar nota";
+            }
+        }
+    </script>
+</body>
+</html>
